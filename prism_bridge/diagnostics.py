@@ -7,17 +7,35 @@ import sys
 import time
 
 
-# A reason code is short lowercase words joined by _ or -, like
-# "project_edit_access_required". Bounding each segment to 16 characters is what
-# excludes credential material: a token or JWT segment is one long run with no
-# separator, and mixed case or a dot fails outright.
-SAFE_REASON = re.compile(r"[a-z][a-z0-9]{0,15}(?:[_-][a-z0-9]{1,15}){0,4}")
 SAFE_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+# Split an identifier into words at _ - and lowercase->uppercase boundaries, so
+# both project_edit_access_required and sandboxUnavailable read as a few words.
+WORDS = re.compile(r"[A-Za-z][a-z0-9]*|[0-9]+")
 
 
 def safe_reason(value):
-    """Pass through an upstream reason code only if it looks like an enum value."""
-    return value if isinstance(value, str) and SAFE_REASON.fullmatch(value) else None
+    """Pass through an upstream reason code only if it reads as a few short words.
+
+    Credential material fails this: a JWT or opaque id fragments into many runs
+    once split on case boundaries, and an API key has one run far longer than a
+    word. Nothing here is a substitute for not echoing free-form text at all,
+    which is why the upstream message is still dropped entirely.
+    """
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        return None
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", value):
+        return None
+    words = WORDS.findall(value)
+    if not 1 <= len(words) <= 6 or any(len(w) > 16 for w in words):
+        return None
+    # Reassembling must account for every character, so separators are all that
+    # can be dropped; anything else means the value was not word-shaped.
+    return value if len("".join(words)) == len(value.replace("_", "").replace("-", "")) else None
+
+
+def safe_int(value, limit=100000):
+    """Pass through a bounded integer, which cannot carry credential material."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= limit else None
 
 
 def task_failure_details(wrapper):
@@ -40,6 +58,8 @@ def task_failure_details(wrapper):
 
     shape = sorted(keys(wrapper) + keys(payload, "payload."))[:20]
     task_status = safe_reason(wrapper.get("status") if isinstance(wrapper, dict) else None)
+    root_cause = safe_reason(payload.get("rootCause") or payload.get("root_cause"))
+    http_status = safe_int(payload.get("httpStatus") or payload.get("http_status"), limit=599)
     reason = payload.get("reason")
     reason = reason if reason in ("sandbox_reconnecting", "conversation_too_large",
                                   "project_edit_access_required", "unknown") else "unknown"
@@ -57,6 +77,8 @@ def task_failure_details(wrapper):
             **({"upstream_status": status} if status is not None else {}),
             **({"upstream_reason_raw": raw_reason} if raw_reason and raw_reason != reason else {}),
             **({"upstream_task_status": task_status} if task_status else {}),
+            **({"upstream_root_cause": root_cause} if root_cause else {}),
+            **({"upstream_http_status": http_status} if http_status is not None else {}),
             **({"upstream_shape": shape} if shape else {})}
 
 
@@ -96,7 +118,8 @@ class Diagnostics:
 
     def emit(self, stage, phase, *, seconds=None, http_status=None, error_code=None, error_class=None,
              upstream_state=None, upstream_reason=None, upstream_category=None, upstream_status=None,
-             upstream_reason_raw=None, upstream_shape=None, upstream_task_status=None):
+             upstream_reason_raw=None, upstream_shape=None, upstream_task_status=None,
+             upstream_root_cause=None, upstream_http_status=None):
         event = {"at": datetime.now(timezone.utc).isoformat(), "stage": stage, "phase": phase}
         if seconds is not None:
             event["seconds"] = round(seconds, 3)
@@ -109,7 +132,9 @@ class Diagnostics:
         for key, value in (("upstream_state", upstream_state), ("upstream_reason", upstream_reason),
                            ("upstream_category", upstream_category), ("upstream_status", upstream_status),
                            ("upstream_reason_raw", upstream_reason_raw), ("upstream_shape", upstream_shape),
-                           ("upstream_task_status", upstream_task_status)):
+                           ("upstream_task_status", upstream_task_status),
+                           ("upstream_root_cause", upstream_root_cause),
+                           ("upstream_http_status", upstream_http_status)):
             if value is not None:
                 event[key] = value
         self.events.append(event)

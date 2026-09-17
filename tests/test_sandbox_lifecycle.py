@@ -235,15 +235,32 @@ def test_unmapped_reason_is_carried_only_when_it_looks_like_an_enum():
     assert details["upstream_shape"] == ["payload", "payload.reason", "status"]
     assert details["upstream_task_status"] == "error"
     # Anything not enum-shaped (spaces, length, a JWT-ish blob) is dropped.
+    # Upstream uses camelCase alongside snake_case, so both must survive.
+    camel = task_failure_details({"payload": {"reason": "sandboxUnavailable"}})
+    assert camel["upstream_reason_raw"] == "sandboxUnavailable"
     for hostile in ["a b", "x" * 80, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0", "", None, 5,
                     "Bearer sk-abc", "user@example.com",
                     "eyJhbGciOiJIUzI1NiJ9",          # one long run, no separator
                     "sk-proj-abcdefghijklmnopqrst",  # long unseparated segment
                     "user-MgDLlr5H0msuiYS0khbdpW3O",
-                    "sandboxExpired"]:               # mixed case is not an enum code here
+                    "1f0db885-270f-4286-afad-3a0d08ab51ac"]:
         assert "upstream_reason_raw" not in task_failure_details({"payload": {"reason": hostile}})
     # A mapped reason is not duplicated into the raw field.
     assert "upstream_reason_raw" not in task_failure_details({"payload": {"reason": "sandbox_reconnecting"}})
+
+
+def test_upstream_root_cause_and_http_status_are_reported():
+    details = task_failure_details({"status": "error", "payload": {
+        "rootCause": "sandboxUnavailable", "httpStatus": 503,
+        "message": "connection terminated for tenant tok-abcdef", "codexRequestDebug": "{...}"}})
+    assert details["upstream_root_cause"] == "sandboxUnavailable"
+    assert details["upstream_http_status"] == 503
+    # The free-form message and the debug blob are still never echoed.
+    assert "tok-abcdef" not in str(details)
+    assert "codexRequestDebug" not in str(details.get("upstream_root_cause", ""))
+    # A non-integer or out-of-range status is dropped rather than echoed.
+    assert "upstream_http_status" not in task_failure_details({"payload": {"httpStatus": "503 Service Unavailable"}})
+    assert "upstream_http_status" not in task_failure_details({"payload": {"httpStatus": 99999}})
 
 
 def test_background_keepalive_does_not_hide_model_poll_stage():
