@@ -14,13 +14,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .protocol import (MAX_BYTES, BridgeError, MemoryStore, ToolContinuationStore, dumps, loads, make_prompt,
                        normalize, output_events, parse_answer, response, uid)
 from .oauth import OAuthManager, REDIRECT_DEFAULT
+from .obs import TrafficRecorder
 
 
-def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | None = None):
+def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | None = None,
+               ui: bool = True, port: int = 8765):
     if not api_key or len(api_key) < 16:
         raise ValueError("PRISM_BRIDGE_API_KEY must have at least 16 characters.")
     store = MemoryStore()
     continuations = ToolContinuationStore()
+    traffic = TrafficRecorder()
 
     @asynccontextmanager
     async def lifespan(_):
@@ -163,6 +166,9 @@ input{width:100%%;padding:8px;box-sizing:border-box}button{padding:8px 18px;marg
         # This is a loopback API for Codex, not a browser endpoint.
         if request.url.path == "/oauth" or request.url.path.startswith("/oauth/"):
             return await call_next(request)
+        if request.url.path == "/ui" or request.url.path.startswith("/ui/"):
+            # Browser-facing admin UI; /ui/api/* verifies X-Bridge-Key itself.
+            return await call_next(request)
         if request.headers.get("origin"):
             return JSONResponse({"error": {"message": "Browser-origin requests are not accepted."}}, status_code=403)
         expected = "Bearer " + api_key
@@ -212,19 +218,31 @@ input{width:100%%;padding:8px;box-sizing:border-box}button{padding:8px 18px;marg
         prompt = make_prompt(body, history, tools, nonce)
         model = body.get("model", "gpt-6-astra")
         initial = response(model, status="in_progress")
+        record = traffic.begin("/v1/responses", model, stream=bool(body.get("stream", False)))
 
         async def generate():
-            continuation = continuations.take(history)
-            kwargs = {"continuation": continuation} if continuation else {}
-            text = await backend.complete(prompt, model, (body.get("reasoning") or {}).get("effort", "medium"), **kwargs)
-            output = parse_answer(text, tools, nonce, body)
-            continuations.put(output, getattr(text, "continuation", None))
-            result = response(model, initial["id"], output)
-            result["created_at"] = initial["created_at"]
-            result["parallel_tool_calls"] = body.get("parallel_tool_calls", True)
-            if body.get("store", True):
-                store.put(result, history)
-            return result
+            try:
+                continuation = continuations.take(history)
+                kwargs = {"continuation": continuation} if continuation else {}
+                text = await backend.complete(prompt, model, (body.get("reasoning") or {}).get("effort", "medium"), **kwargs)
+                output = parse_answer(text, tools, nonce, body)
+                continuations.put(output, getattr(text, "continuation", None))
+                result = response(model, initial["id"], output)
+                result["created_at"] = initial["created_at"]
+                result["parallel_tool_calls"] = body.get("parallel_tool_calls", True)
+                if body.get("store", True):
+                    store.put(result, history)
+                traffic.finish(record, output=output)
+                return result
+            except BridgeError as exc:
+                traffic.finish(record, error=exc.payload())
+                raise
+            except asyncio.CancelledError:
+                traffic.finish(record, error={"code": "client_cancelled", "message": "Client disconnected before completion."})
+                raise
+            except Exception as exc:
+                traffic.finish(record, error={"code": "internal_error", "message": type(exc).__name__})
+                raise
 
         if not body.get("stream", False):
             return await generate()
@@ -338,5 +356,9 @@ input{width:100%%;padding:8px;box-sizing:border-box}button{padding:8px 18px;marg
 
         return StreamingResponse(chat_events(), media_type="text/event-stream",
                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
+
+    if ui:
+        from .admin import create_admin_router
+        app.include_router(create_admin_router(backend, api_key, traffic, oauth, port=port))
 
     return app

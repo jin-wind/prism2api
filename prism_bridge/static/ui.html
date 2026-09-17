@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism Bridge 控制台</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --text:#1a1d21; --muted:#6b7280; --border:#e2e5ea;
+  --accent:#2563eb; --accent-text:#ffffff; --ok:#0a7d39; --ok-bg:#e7f6ed;
+  --warn:#b45309; --warn-bg:#fef3e2; --bad:#b91c1c; --bad-bg:#fdecec;
+  --code-bg:#f0f1f4; --shadow:0 1px 3px rgba(16,24,40,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#101318; --card:#181c23; --text:#e7eaf0; --muted:#8b93a1; --border:#2a3038;
+    --accent:#3b82f6; --accent-text:#ffffff; --ok:#34d399; --ok-bg:#0c2a1e;
+    --warn:#fbbf24; --warn-bg:#2d2411; --bad:#f87171; --bad-bg:#2f1616;
+    --code-bg:#0d1117; --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.6 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+  border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;font-weight:650}
+header .sub{color:var(--muted);font-size:12px}
+#connDot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+#connDot.ok{background:var(--ok)} #connDot.bad{background:var(--bad)}
+nav{display:flex;gap:4px;padding:10px 20px 0;flex-wrap:wrap}
+nav button{border:1px solid transparent;background:none;color:var(--muted);padding:7px 14px;
+  border-radius:8px 8px 0 0;cursor:pointer;font-size:14px}
+nav button.active{background:var(--card);color:var(--text);border-color:var(--border);
+  border-bottom-color:var(--card);font-weight:600}
+main{padding:16px 20px 48px;max-width:1080px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:13px}
+.kv .k{color:var(--muted)} .kv .v{font-variant-numeric:tabular-nums;text-align:right;word-break:break-all}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+button.action{background:var(--accent);color:var(--accent-text);border:0;border-radius:8px;
+  padding:8px 16px;font-size:14px;cursor:pointer}
+button.action:disabled{opacity:.5;cursor:default}
+button.ghost{background:none;border:1px solid var(--border);color:var(--text);
+  border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer}
+textarea,input[type=text],input[type=password]{width:100%;background:var(--code-bg);color:var(--text);
+  border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;
+  font-family:ui-monospace,Consolas,monospace}
+textarea{min-height:76px;resize:vertical}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:var(--muted);text-align:left;font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;word-break:break-word}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:12px;overflow-x:auto;font-size:12.5px;line-height:1.5}
+.msg{margin-top:8px;font-size:13px;border-radius:8px;padding:8px 12px;display:none;white-space:pre-wrap}
+.msg.show{display:block}
+.msg.ok{background:var(--ok-bg);color:var(--ok)} .msg.bad{background:var(--bad-bg);color:var(--bad)}
+.section{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.section h2{margin:0 0 4px;font-size:15px}
+.section .hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+#gate{max-width:420px;margin:80px auto;text-align:center}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.tablewrap{overflow-x:auto}
+@media (max-width:520px){ main,header,nav{padding-left:12px;padding-right:12px} }
+</style>
+</head>
+<body>
+
+<div id="gate" class="hidden">
+  <div class="card" style="text-align:left">
+    <h3>连接密钥 / Bridge key</h3>
+    <p class="muted" style="font-size:13px">输入启动桥接时的 <code>PRISM_BRIDGE_API_KEY</code>（保存在
+      <code>.local\bridge-key.txt</code>），仅存储在本浏览器。<br>
+      Enter the bridge API key; it is stored only in this browser.</p>
+    <input type="password" id="keyInput" placeholder="bridge key">
+    <div class="row"><button class="action" id="keySave">连接 Connect</button></div>
+    <div class="msg bad" id="keyMsg"></div>
+  </div>
+</div>
+
+<div id="appRoot" class="hidden">
+<header>
+  <span id="connDot"></span>
+  <div><h1>Prism Bridge 控制台</h1>
+  <div class="sub" id="headSub">connecting…</div></div>
+  <div style="margin-left:auto"><button class="ghost" id="lockBtn" title="清除本浏览器保存的密钥">退出 Sign out</button></div>
+</header>
+<nav>
+  <button data-tab="dash" class="active">总览 Overview</button>
+  <button data-tab="login">登录 Login</button>
+  <button data-tab="traffic">流量 Traffic</button>
+  <button data-tab="diag">诊断 Diagnostics</button>
+  <button data-tab="setup">接入 Codex Setup</button>
+</nav>
+<main>
+
+<!-- ============ Overview ============ -->
+<div id="tab-dash">
+  <div class="grid" id="dashCards"></div>
+  <div class="section" id="lastErrorBox" style="margin-top:14px;display:none">
+    <h2>最近错误 Last error</h2>
+    <pre id="lastErrorPre"></pre>
+  </div>
+</div>
+
+<!-- ============ Login ============ -->
+<div id="tab-login" class="hidden">
+  <div class="section">
+    <h2>当前认证状态 Auth status</h2>
+    <div class="kv"><span class="k">Prism 会话 session</span><span class="v" id="authPrism">…</span></div>
+    <div class="kv"><span class="k">OAuth 凭据 credential</span><span class="v" id="authOauth">…</span></div>
+    <div class="row">
+      <button class="ghost" id="authRefreshBtn">强制刷新 Prism 会话 Force refresh</button>
+      <button class="ghost" id="authStatusBtn">重新检查 Recheck</button>
+    </div>
+    <div class="msg" id="authTopMsg"></div>
+  </div>
+
+  <div class="section">
+    <h2>方式一：浏览器 OAuth 登录（推荐）</h2>
+    <p class="hint">打开 OpenAI 官方登录页；完成后回到这里点“绑定到 Prism”。若回调页面打不开，
+      把地址栏完整 URL 粘贴到下面提交。<br>
+      Method 1: browser OAuth login, then bind the token to Prism.</p>
+    <div class="row">
+      <button class="action" id="oauthOpenBtn">1. 在浏览器登录 Open OpenAI login</button>
+      <span id="oauthPoll" class="muted"></span>
+    </div>
+    <div class="row">
+      <input type="text" id="oauthCallback" placeholder="（可选）粘贴回调 URL: http://…/oauth/callback?code=…&state=…">
+      <button class="ghost" id="oauthSubmitBtn">提交回调 Submit</button>
+    </div>
+    <div class="row">
+      <button class="action" id="oauthBindBtn">2. 绑定到 Prism Bind to Prism</button>
+    </div>
+    <div class="msg" id="oauthMsg"></div>
+  </div>
+
+  <div class="section">
+    <h2>方式二：粘贴 Cookie</h2>
+    <p class="hint">浏览器开发者工具 → Network → 任意已登录的 prism.openai.com 请求 →
+      Request Headers → 复制完整 Cookie 值。<br>
+      Method 2: paste the full Cookie header value from a signed-in Prism request.</p>
+    <textarea id="cookieInput" placeholder="prism_session_token=…; __cf_bm=…; …"></textarea>
+    <div class="row"><button class="action" id="cookieBtn">验证并保存 Verify &amp; save</button></div>
+    <div class="msg" id="cookieMsg"></div>
+  </div>
+
+  <div class="section">
+    <h2>方式三：导入 Access Token</h2>
+    <p class="hint">粘贴 CLIProxyAPI / Codex auth.json / session JSON 的文件内容，或直接粘贴 access token。<br>
+      Method 3: paste the auth JSON file content, or the raw access token.</p>
+    <textarea id="tokenInput" placeholder='{"access_token": "…"} 或 eyJhbGciOi…'></textarea>
+    <div class="row"><button class="action" id="tokenBtn">导入并验证 Import &amp; verify</button></div>
+    <div class="msg" id="tokenMsg"></div>
+  </div>
+</div>
+
+<!-- ============ Traffic ============ -->
+<div id="tab-traffic" class="hidden">
+  <div class="section">
+    <h2>最近请求 Recent turns <span class="muted" id="trafficCount"></span></h2>
+    <p class="hint">只记录元数据（模型、耗时、工具名、错误分类），不保存任何提示词或工具参数。<br>
+      Metadata only — no prompts or tool arguments are stored.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>#</th><th>时间 Time</th><th>端点</th><th>状态</th><th>耗时 s</th><th>工具 Tools</th><th>错误 Error</th></tr></thead>
+      <tbody id="trafficBody"><tr><td colspan="7" class="muted">暂无记录 no turns yet</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ============ Diagnostics ============ -->
+<div id="tab-diag" class="hidden">
+  <div class="section">
+    <h2>预检 Preflight</h2>
+    <p class="hint">只读检查认证与项目访问；勾选“含沙箱”会额外初始化沙箱（可能较慢），不会发送模型请求。<br>
+      Read-only auth/project checks; the sandbox option provisions but never sends a model request.</p>
+    <div class="row">
+      <button class="action" id="preflightBtn">运行预检 Run preflight</button>
+      <label><input type="checkbox" id="provisionChk"> 含沙箱初始化 with sandbox</label>
+      <span id="preflightSpin" class="muted"></span>
+    </div>
+    <div class="msg" id="preflightMsg"></div>
+    <pre id="preflightOut" class="hidden"></pre>
+  </div>
+  <div class="section">
+    <h2>事件日志 Event log <button class="ghost" id="logsRefreshBtn" style="float:right">刷新 Refresh</button></h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>时间 Time</th><th>阶段 Stage</th><th>Phase</th><th>耗时 s</th><th>HTTP</th><th>错误 Error</th></tr></thead>
+      <tbody id="logsBody"><tr><td colspan="6" class="muted">…</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ============ Setup ============ -->
+<div id="tab-setup" class="hidden">
+  <div class="section">
+    <h2>Codex 接入 Setup</h2>
+    <p class="hint">把下面的配置保存为 <code id="setupPath">$CODEX_HOME/prism_bridge.config.toml</code>，
+      启动 Codex 前设置环境变量 <code>PRISM_BRIDGE_API_KEY</code>（即本页使用的密钥）。
+      Windows 用户也可直接运行 <code>Use-Codex.ps1</code>，它会自动完成这些步骤。</p>
+    <div class="row"><button class="ghost" id="copyTomlBtn">复制配置 Copy config</button>
+      <span id="copyMsg" class="muted"></span></div>
+    <pre id="setupToml">…</pre>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let KEY = "";
+
+/* ---------- key handling ---------- */
+(function initKey(){
+  const m = location.hash.match(/[#&]key=([^&]+)/);
+  if (m) {
+    try { localStorage.setItem("bridgeKey", decodeURIComponent(m[1])); } catch(e){}
+    history.replaceState(null, "", location.pathname);
+  }
+  try { KEY = localStorage.getItem("bridgeKey") || ""; } catch(e){ KEY = ""; }
+  if (KEY) boot(); else showGate();
+})();
+
+function showGate(msg){
+  $("appRoot").classList.add("hidden");
+  $("gate").classList.remove("hidden");
+  if (msg){ const el=$("keyMsg"); el.textContent=msg; el.classList.add("show"); }
+}
+$("keySave").onclick = () => {
+  const v = $("keyInput").value.trim();
+  if (v.length < 16){ showGate("密钥至少 16 个字符 / key must be at least 16 chars"); return; }
+  try { localStorage.setItem("bridgeKey", v); } catch(e){}
+  KEY = v; boot();
+};
+$("keyInput").addEventListener("keydown", e => { if (e.key === "Enter") $("keySave").click(); });
+$("lockBtn").onclick = () => {
+  try { localStorage.removeItem("bridgeKey"); } catch(e){}
+  KEY = ""; location.reload();
+};
+
+/* ---------- api helper ---------- */
+async function api(path, opts = {}){
+  const headers = Object.assign({"X-Bridge-Key": KEY}, opts.headers || {});
+  if (opts.body && !(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  let r;
+  try { r = await fetch(path, Object.assign({}, opts, {headers})); }
+  catch(e){ throw new Error("无法连接桥接服务 cannot reach bridge: " + e.message); }
+  if (r.status === 401 && path.startsWith("/ui/")){ showGate("密钥无效 invalid key"); throw new Error("unauthorized"); }
+  let j = {};
+  try { j = await r.json(); } catch(e){}
+  if (!r.ok){
+    const err = j && j.error;
+    const text = err ? (err.message || err.code || JSON.stringify(err)) : ("HTTP " + r.status);
+    throw new Error(text);
+  }
+  return j;
+}
+function setMsg(id, kind, text){
+  const el = $(id);
+  el.className = "msg show " + kind;
+  el.textContent = text;
+}
+function fmtDur(s){
+  if (s == null) return "—";
+  s = Math.max(0, Math.round(s));
+  if (s < 90) return s + "s";
+  if (s < 5400) return Math.round(s/60) + "m";
+  return (s/3600).toFixed(1) + "h";
+}
+function esc(v){ return String(v == null ? "" : v); }
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === btn));
+    ["dash","login","traffic","diag","setup"].forEach(t =>
+      $("tab-" + t).classList.toggle("hidden", t !== btn.dataset.tab));
+    if (btn.dataset.tab === "traffic") refreshTraffic();
+    if (btn.dataset.tab === "login") refreshAuthStatus();
+    if (btn.dataset.tab === "diag") refreshLogs();
+    if (btn.dataset.tab === "setup") loadSetup();
+  };
+});
+
+/* ---------- overview ---------- */
+function pill(ok, okText, badText, warn){
+  const cls = ok ? "ok" : (warn ? "warn" : "bad");
+  return `<span class="pill ${cls}">${ok ? okText : badText}</span>`;
+}
+function card(title, rows){
+  return `<div class="card"><h3>${title}</h3>` +
+    rows.map(([k,v]) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("") +
+    `</div>`;
+}
+async function refreshDash(){
+  let s;
+  try { s = await api("/ui/api/status"); $("connDot").className = "ok"; }
+  catch(e){
+    if (e.message === "unauthorized") return;
+    $("connDot").className = "bad";
+    $("headSub").textContent = "连接失败 offline — " + e.message;
+    return;
+  }
+  $("headSub").textContent = `v${s.bridge.version} · ${s.bridge.endpoint} · 运行 ${fmtDur(s.bridge.uptime_s)}`;
+  const p = s.prism_auth, o = s.oauth, sb = s.sandbox, d = s.diagnostics, t = s.traffic;
+  $("dashCards").innerHTML =
+    card("桥接 Bridge", [
+      ["版本 version", esc(s.bridge.version)],
+      ["请求 turns", `${t.total} 总 / <span style="color:${t.failed ? "var(--bad)" : "inherit"}">${t.failed} 失败</span>`],
+      ["当前阶段 stage", esc(d.current_stage)],
+      ["完成轮次 completed", esc(d.completed_turns)],
+    ]) +
+    card("Prism 会话 Session", [
+      ["状态 status", pill(p.signed_in, "已登录 signed in", p.ready ? "未登录 signed out" : "未验证 unverified", !p.ready)],
+      ["下次刷新 refresh", p.next_refresh_in_s != null ? fmtDur(p.next_refresh_in_s) : "—"],
+      ["持久化 persisted", p.persistent ? esc(p.state_file) : "否 no"],
+      ["账号 account", esc(p.expected_user || "—")],
+    ]) +
+    card("OAuth", [
+      ["状态 status", pill(o.configured && !o.expired, "有效 valid", o.configured ? "已过期 expired" : "未配置 not set", o.configured)],
+      ["邮箱 email", esc(o.email || "—")],
+      ["剩余 expires in", o.configured ? fmtDur(o.expires_in_s) : "—"],
+    ]) +
+    card("沙箱 Sandbox", [
+      ["状态 status", pill(sb.provisioned, "已就绪 ready", sb.needs_bootstrap ? "待初始化 pending" : "未知 unknown", true)],
+      ["资源令牌 resource", sb.resource_expires_in_s ? fmtDur(sb.resource_expires_in_s) : "—"],
+      ["曾重建 replaced", sb.replaced ? "是 yes" : "否 no"],
+      ["项目 project", esc(s.project.id || "—")],
+    ]);
+  const box = $("lastErrorBox");
+  if (d.last_error){ box.style.display = "block"; $("lastErrorPre").textContent = JSON.stringify(d.last_error, null, 2); }
+  else box.style.display = "none";
+}
+
+/* ---------- login ---------- */
+async function refreshAuthStatus(){
+  try {
+    const a = await api("/ui/api/auth/status");
+    $("authPrism").innerHTML = a.prism
+      ? pill(a.prism.signed_in, "已登录 signed in", a.prism.state_file_exists ? "有状态文件，未验证 saved, unverified" : "未登录 signed out", a.prism.state_file_exists)
+      : "不适用 n/a";
+    $("authOauth").innerHTML = a.oauth
+      ? pill(a.oauth.configured && !a.oauth.expired, "有效 valid", a.oauth.configured ? "已过期 expired" : "未配置 not set", a.oauth.configured)
+      : "未启用 disabled";
+  } catch(e){ if (e.message !== "unauthorized") setMsg("authTopMsg", "bad", e.message); }
+}
+$("authStatusBtn").onclick = refreshAuthStatus;
+$("authRefreshBtn").onclick = async () => {
+  setMsg("authTopMsg", "ok", "刷新中 refreshing…");
+  try {
+    const r = await api("/ui/api/auth/refresh", {method: "POST", body: "{}"});
+    setMsg("authTopMsg", "ok", "会话已刷新 session refreshed · cookies: " + (r.cookie_names || []).length);
+    refreshAuthStatus(); refreshDash();
+  } catch(e){ setMsg("authTopMsg", "bad", "刷新失败 refresh failed: " + e.message); }
+};
+
+/* OAuth */
+let oauthTimer = null;
+$("oauthOpenBtn").onclick = async () => {
+  try {
+    const r = await fetch("/oauth/login").then(x => x.json());
+    window.open(r.authorization_url, "_blank");
+    setMsg("oauthMsg", "ok", "已打开登录页；完成登录后回到这里。Login page opened — finish there, then come back.");
+    if (oauthTimer) clearInterval(oauthTimer);
+    let ticks = 0;
+    oauthTimer = setInterval(async () => {
+      ticks++;
+      try {
+        const st = await fetch("/oauth/status").then(x => x.json());
+        if (st.configured && !st.expired){
+          clearInterval(oauthTimer); oauthTimer = null;
+          $("oauthPoll").textContent = "";
+          setMsg("oauthMsg", "ok", `OAuth 登录成功 login ok: ${st.email || ""} — 现在点“绑定到 Prism”。Now click "Bind to Prism".`);
+          refreshAuthStatus();
+        } else $("oauthPoll").textContent = "等待登录完成 waiting… " + ticks * 3 + "s";
+      } catch(e){}
+      if (ticks > 100){ clearInterval(oauthTimer); oauthTimer = null; $("oauthPoll").textContent = ""; }
+    }, 3000);
+  } catch(e){ setMsg("oauthMsg", "bad", e.message); }
+};
+$("oauthSubmitBtn").onclick = async () => {
+  const url = $("oauthCallback").value.trim();
+  if (!url){ setMsg("oauthMsg", "bad", "请先粘贴回调 URL paste the callback URL first"); return; }
+  try {
+    const fd = new URLSearchParams(); fd.set("callback_url", url);
+    const r = await fetch("/oauth/submit", {method: "POST", body: fd});
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+    setMsg("oauthMsg", "ok", `OAuth 登录成功 login ok: ${j.email || ""} — 现在点“绑定到 Prism”。`);
+    refreshAuthStatus();
+  } catch(e){ setMsg("oauthMsg", "bad", "回调提交失败 submit failed: " + e.message); }
+};
+$("oauthBindBtn").onclick = async () => {
+  setMsg("oauthMsg", "ok", "绑定中 binding… (验证 Prism 会话，最长约 30 秒)");
+  $("oauthBindBtn").disabled = true;
+  try {
+    const r = await api("/ui/api/auth/oauth-bind", {method: "POST", body: "{}"});
+    setMsg("oauthMsg", "ok", `绑定成功 bound to Prism ✓ ${r.email || ""} — 桥接已可用。The bridge is authenticated.`);
+    refreshAuthStatus(); refreshDash();
+  } catch(e){ setMsg("oauthMsg", "bad", "绑定失败 bind failed: " + e.message); }
+  finally { $("oauthBindBtn").disabled = false; }
+};
+
+/* Cookie */
+$("cookieBtn").onclick = async () => {
+  const v = $("cookieInput").value.trim();
+  if (!v){ setMsg("cookieMsg", "bad", "请粘贴 Cookie 值 paste the cookie value"); return; }
+  setMsg("cookieMsg", "ok", "验证中 verifying…");
+  $("cookieBtn").disabled = true;
+  try {
+    const r = await api("/ui/api/auth/cookie", {method: "POST", body: JSON.stringify({cookie: v})});
+    setMsg("cookieMsg", "ok", "登录成功 signed in ✓ 已持久化 persisted: " + (r.persistent ? "yes" : "no"));
+    $("cookieInput").value = "";
+    refreshAuthStatus(); refreshDash();
+  } catch(e){ setMsg("cookieMsg", "bad", "验证失败 failed: " + e.message); }
+  finally { $("cookieBtn").disabled = false; }
+};
+
+/* Token import */
+$("tokenBtn").onclick = async () => {
+  const v = $("tokenInput").value.trim();
+  if (!v){ setMsg("tokenMsg", "bad", "请粘贴内容 paste the JSON or token"); return; }
+  let body;
+  try { JSON.parse(v); body = {content: v}; } catch(e){ body = {token: v}; }
+  setMsg("tokenMsg", "ok", "导入验证中 importing…");
+  $("tokenBtn").disabled = true;
+  try {
+    const r = await api("/ui/api/auth/import", {method: "POST", body: JSON.stringify(body)});
+    setMsg("tokenMsg", "ok", "导入成功 imported ✓ 已登录 signed in");
+    $("tokenInput").value = "";
+    refreshAuthStatus(); refreshDash();
+  } catch(e){ setMsg("tokenMsg", "bad", "导入失败 failed: " + e.message); }
+  finally { $("tokenBtn").disabled = false; }
+};
+
+/* ---------- traffic ---------- */
+async function refreshTraffic(){
+  try {
+    const t = await api("/ui/api/traffic");
+    $("trafficCount").textContent = `（共 ${t.total}，失败 ${t.failed}）`;
+    const rows = (t.turns || []).map(x => {
+      const st = x.status === "ok" ? '<span class="pill ok">ok</span>'
+        : x.status === "failed" ? '<span class="pill bad">failed</span>'
+        : '<span class="pill warn">running</span>';
+      const err = x.error ? `${esc(x.error.code)}: ${esc(x.error.message)}` : "";
+      return `<tr><td>${x.seq}</td><td>${esc(x.at).replace("T"," ").slice(0,19)}</td>
+        <td>${esc(x.endpoint)}${x.stream ? " (SSE)" : ""}</td><td>${st}</td>
+        <td>${x.duration_s != null ? x.duration_s : "…"}</td>
+        <td>${esc((x.tool_calls || []).join(", "))}</td><td>${err}</td></tr>`;
+    });
+    $("trafficBody").innerHTML = rows.length ? rows.join("") :
+      '<tr><td colspan="7" class="muted">暂无记录 no turns yet</td></tr>';
+  } catch(e){}
+}
+
+/* ---------- diagnostics ---------- */
+$("preflightBtn").onclick = async () => {
+  const provision = $("provisionChk").checked;
+  $("preflightBtn").disabled = true;
+  $("preflightSpin").textContent = provision ? "运行中（含沙箱，可能需要 1–2 分钟）…" : "运行中 running…";
+  $("preflightOut").classList.add("hidden");
+  try {
+    const r = await api("/ui/api/preflight", {method: "POST", body: JSON.stringify({provision})});
+    setMsg("preflightMsg", r.ok ? "ok" : "bad", r.ok
+      ? "预检通过 preflight ok ✓ " + JSON.stringify(r.checks)
+      : "预检失败 failed: " + (r.error ? (r.error.message || r.error.code) : "unknown"));
+    $("preflightOut").textContent = JSON.stringify(r, null, 2);
+    $("preflightOut").classList.remove("hidden");
+    refreshLogs(); refreshDash();
+  } catch(e){ setMsg("preflightMsg", "bad", e.message); }
+  finally { $("preflightBtn").disabled = false; $("preflightSpin").textContent = ""; }
+};
+async function refreshLogs(){
+  try {
+    const d = await api("/ui/api/logs");
+    const rows = (d.events || []).slice().reverse().map(ev =>
+      `<tr><td>${esc(ev.at).replace("T"," ").slice(0,19)}</td><td>${esc(ev.stage)}</td>
+       <td>${esc(ev.phase)}</td><td>${ev.seconds != null ? ev.seconds : ""}</td>
+       <td>${ev.http_status != null ? ev.http_status : ""}</td>
+       <td>${esc(ev.error_code || "")}${ev.upstream_category ? " · " + esc(ev.upstream_category) : ""}</td></tr>`);
+    $("logsBody").innerHTML = rows.length ? rows.join("") :
+      '<tr><td colspan="6" class="muted">暂无事件 no events</td></tr>';
+  } catch(e){}
+}
+$("logsRefreshBtn").onclick = refreshLogs;
+
+/* ---------- setup ---------- */
+let setupLoaded = false;
+async function loadSetup(){
+  if (setupLoaded) return;
+  try {
+    const s = await api("/ui/api/setup");
+    $("setupToml").textContent = s.config_toml;
+    $("setupPath").textContent = s.config_path;
+    setupLoaded = true;
+  } catch(e){ $("setupToml").textContent = e.message; }
+}
+$("copyTomlBtn").onclick = async () => {
+  try { await navigator.clipboard.writeText($("setupToml").textContent);
+    $("copyMsg").textContent = "已复制 copied ✓"; }
+  catch(e){ $("copyMsg").textContent = "复制失败，请手动选择 copy manually"; }
+  setTimeout(() => $("copyMsg").textContent = "", 2500);
+};
+
+/* ---------- boot ---------- */
+let dashTimer = null;
+function boot(){
+  $("gate").classList.add("hidden");
+  $("appRoot").classList.remove("hidden");
+  refreshDash();
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = setInterval(() => {
+    refreshDash();
+    if (!$("tab-traffic").classList.contains("hidden")) refreshTraffic();
+  }, 5000);
+}
+</script>
+</body>
+</html>

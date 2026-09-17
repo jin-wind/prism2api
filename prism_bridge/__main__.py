@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 
 import uvicorn
@@ -121,12 +122,15 @@ def main():
             if not args.auth_file:
                 raise BridgeError("auth-import needs --auth-file.")
             seed = import_access_token_header("", access_token_from_file(args.auth_file))
+        # serve may start unauthenticated: the web UI (/ui) offers cookie,
+        # token-import and OAuth login after startup.
+        allow_missing = Path(args.auth_state).exists() or args.command == "serve"
         if args.template_file:
             template = SessionTemplate.from_fixture(args.template_file, args.cookie_file,
-                                                    allow_missing_cookie=Path(args.auth_state).exists())
+                                                    allow_missing_cookie=allow_missing)
         else:
             template = SessionTemplate.from_har(args.har, args.cookie_file, cookie_header=seed,
-                                               allow_missing_cookie=Path(args.auth_state).exists())
+                                               allow_missing_cookie=allow_missing)
         if args.command.startswith("oauth-"):
             asyncio.run(oauth_command(args))
             return
@@ -154,9 +158,14 @@ def main():
                                bootstrap=not args.reuse_har_sandbox, auth_state_file=args.auth_state,
                                read_timeout=float(os.environ.get("PRISM_HTTP_READ_TIMEOUT", "90")), diagnostics=True)
         app = create_app(backend, os.environ.get("PRISM_BRIDGE_API_KEY", ""),
-                         oauth=make_oauth(args) if args.command == "serve" else None)
+                         oauth=make_oauth(args) if args.command == "serve" else None,
+                         port=args.port)
     except (BridgeError, ValueError) as exc:
         parser.error(str(exc))
+    if args.command == "serve":
+        # Fragment stays in the browser; nothing after '#' is sent over HTTP.
+        print(f"[prism-bridge] Web UI: http://127.0.0.1:{args.port}/ui#key="
+              f"{os.environ.get('PRISM_BRIDGE_API_KEY', '')}", file=sys.stderr, flush=True)
     uvicorn.run(app, host=args.host, port=args.port, access_log=False, log_level="warning")
 
 

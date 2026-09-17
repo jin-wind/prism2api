@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prism-codex-bridge"
-version = "0.2.2"
+version = "0.3.0"
 description = "Experimental Prism web-agent to Codex Responses protocol bridge"
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx[http2]>=0.27,<1", "jsonschema>=4.22,<5"]
@@ -12,8 +12,14 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx[http2]>=0.27,<1"
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
 
+[project.scripts]
+prism-bridge = "prism_bridge.__main__:main"
+
 [tool.setuptools.packages.find]
 include = ["prism_bridge*"]
+
+[tool.setuptools.package-data]
+prism_bridge = ["static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

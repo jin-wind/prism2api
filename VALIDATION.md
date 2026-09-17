@@ -1,4 +1,17 @@
-# 验证记录（2026-09-16）
+# 验证记录
+
+## v0.3.0（2026-09-17）：Web UI 控制台
+
+- 新增 `/ui` 控制台（单文件、无构建步骤）：总览、三种登录方式、流量、诊断、Codex 接入。
+- 新增 `obs.py`（有界流量记录，仅元数据）与 `admin.py`（`/ui/api`，要求 `X-Bridge-Key` 头）。
+- `serve` 允许未认证启动，之后在 UI 登录；`/v1` 的 Bearer 认证与拒绝浏览器来源行为不变。
+- 项目改为 git 管理；`deploy/` 一次性脚本、发布压缩包和含凭据文件移入 `archive/`（gitignored）。
+- 验证：`python -m pytest -q` **102 passed**（原 93 项回归 + 9 项 admin/UI 测试）；
+  内嵌 UI JavaScript 通过 Node 语法检查；真实启动冒烟（端口 8899）：
+  `/ui` 200、无 key 401、`/ui/api/status` JSON 正确、`/v1/models` Bearer 200、未认证启动成功。
+- 未做：真实 Prism 凭据下通过 UI 完成登录的实网验证；React/Vite 版本 UI（当前为无构建单文件）。
+
+# 历史验证记录（2026-09-16）
 
 ## 已验证
 

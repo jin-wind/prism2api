@@ -76,6 +76,23 @@ python -m prism_bridge inspect --har 'D:\下載\prism.openai.com.har'
 .\Start-Bridge.ps1 -HarPath 'D:\下載\prism.openai.com.har'
 ```
 
+## Web UI（控制台，v0.3.0 新增）
+
+启动后打开终端里打印的地址（形如 `http://127.0.0.1:8765/ui#key=…`），或手动访问
+`http://127.0.0.1:8765/ui` 并输入 `.local\bridge-key.txt` 里的桥接 key。控制台提供：
+
+- **总览**：Prism 会话状态、下次刷新倒计时、OAuth 凭据有效期、沙箱状态、最近错误。
+- **登录**：三种方式免命令行完成认证——浏览器 OAuth 登录并一键绑定 Prism、粘贴 Cookie、
+  粘贴 access-token JSON。验证成功才落盘，替换原来的 `auth-import` / `oauth-bind` 手工流程。
+- **流量**：最近每轮请求的模型、耗时、工具调用名和错误分类（只记录元数据，不保存提示词、
+  工具参数或任何凭据）。
+- **诊断**：一键预检（等价 `doctor` / `doctor --provision`）和有界事件日志。
+- **接入**：生成 Codex profile 配置并可复制。
+
+首次使用可以先不准备 Cookie 文件：`serve` 允许未认证启动，之后在 UI 里登录即可。
+UI 页面本身不含密钥；所有 `/ui/api` 请求要求 `X-Bridge-Key` 头，跨站请求会被浏览器
+CORS 预检拦截。`/v1` 端点保持原有 Bearer 认证与拒绝浏览器来源的行为不变。
+
 终端 2，从准备让 Codex 操作的项目目录启动：
 
 ```powershell
