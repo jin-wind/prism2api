@@ -1,0 +1,18 @@
+# Copy to $CODEX_HOME/prism_bridge.config.toml (not project .codex/config.toml).
+# Experimental remote-agent text protocol; this is NOT a native Prism model API.
+model = "gpt-6-astra"
+model_provider = "prism_bridge"
+model_reasoning_effort = "medium"
+model_reasoning_summary = "none"
+web_search = "disabled"
+
+[model_providers.prism_bridge]
+name = "Prism bridge (experimental)"
+base_url = "http://127.0.0.1:8765/v1"
+wire_api = "responses"
+env_key = "PRISM_BRIDGE_API_KEY"
+requires_openai_auth = false
+supports_websockets = false
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 360000

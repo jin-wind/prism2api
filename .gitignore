@@ -1,0 +1,13 @@
+reference/
+.venv/
+.local/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+*.har
+*.zip
+*.log
+.env
+
+archive/
+*.tar.gz
