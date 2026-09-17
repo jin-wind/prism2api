@@ -33,6 +33,10 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
     store = MemoryStore()
     continuations = ToolContinuationStore()
     traffic = TrafficRecorder()
+    # The model id belongs to the captured template: Prism renames it on redeploy
+    # and a stale hardcoded default is rejected upstream with HTTP 400.
+    template = getattr(backend, "template", None)
+    default_model = (getattr(template, "metadata", {}) or {}).get("model") or "gpt-5.6-sol"
 
     @asynccontextmanager
     async def lifespan(_):
@@ -210,7 +214,7 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
 
     @app.get("/v1/models")
     async def models():
-        return {"object": "list", "data": [{"id": "gpt-6-astra", "object": "model", "created": 0,
+        return {"object": "list", "data": [{"id": default_model, "object": "model", "created": 0,
                                             "owned_by": "prism-bridge-unverified-upstream"}]}
 
     @app.get("/v1/responses/{response_id}")
@@ -235,7 +239,7 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
         history, tools = normalize(body, previous)
         nonce = uid("nonce_")
         prompt = make_prompt(body, history, tools, nonce)
-        model = body.get("model", "gpt-6-astra")
+        model = body.get("model", default_model)
         initial = response(model, status="in_progress")
         record = traffic.begin("/v1/responses", model, stream=bool(body.get("stream", False)))
 
@@ -317,7 +321,7 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
             raise BridgeError("Invalid JSON request.") from None
         if not isinstance(body, dict) or not isinstance(body.get("messages"), list) or not body["messages"]:
             raise BridgeError("chat.completions requires a non-empty messages list.")
-        model = body.get("model", "gpt-6-astra")
+        model = body.get("model", default_model)
         messages = body["messages"]
         for item in messages:
             if not isinstance(item, dict) or item.get("role") not in ("system", "user", "assistant") \

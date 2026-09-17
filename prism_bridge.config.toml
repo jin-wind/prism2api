@@ -1,6 +1,6 @@
 # Copy to $CODEX_HOME/prism_bridge.config.toml (not project .codex/config.toml).
 # Experimental remote-agent text protocol; this is NOT a native Prism model API.
-model = "gpt-6-astra"
+model = "gpt-5.6-sol"
 model_provider = "prism_bridge"
 model_reasoning_effort = "medium"
 model_reasoning_summary = "none"

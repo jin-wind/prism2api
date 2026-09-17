@@ -149,6 +149,23 @@ class SessionTemplate:
                    copy.deepcopy(data.get("editor_context")),
                    copy.deepcopy(data.get("initial_system")))
 
+    def to_fixture(self, *, include_cookie=False):
+        """Serialize back to the fixture format from_fixture() reads.
+
+        Prism redeploys change the model id, project and Server Action, so the
+        captured template has to be refreshable without hand-editing JSON. The
+        Cookie is left out by default: a deployment should carry its own
+        auth-state file rather than a copy of the capturing browser's session.
+        """
+        headers = {k: v for k, v in self.headers.items()
+                   if include_cookie or k.lower() != "cookie"}
+        return {"version": 1,
+                "metadata": copy.deepcopy(self.metadata),
+                "headers": headers,
+                "conversation_action": copy.deepcopy(self.conversation_action),
+                "editor_context": copy.deepcopy(self.editor_context),
+                "initial_system": copy.deepcopy(self.initial_system)}
+
     def new_turn(self, messages, model, effort, conversation=None, continuation=None):
         metadata = copy.deepcopy(self.metadata)
         # HAR and live validation: other prefixes are legacy/read-only conversations.

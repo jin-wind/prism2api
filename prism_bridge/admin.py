@@ -272,7 +272,8 @@ def create_admin_router(backend, api_key: str, traffic, oauth=None, *, port: int
     @router.get("/ui/api/setup")
     async def setup(request: Request):
         check_key(request)
-        toml_text = f"""model = "gpt-6-astra"
+        model_id = (getattr(getattr(backend, "template", None), "metadata", {}) or {}).get("model") or "gpt-5.6-sol"
+        toml_text = f"""model = "{model_id}"
 model_provider = "prism_bridge"
 model_reasoning_effort = "medium"
 model_reasoning_summary = "none"

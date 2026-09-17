@@ -89,8 +89,10 @@ async def oauth_command(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Experimental Prism to Codex Responses bridge")
-    parser.add_argument("command", choices=["inspect", "serve", "doctor", "auth-status", "auth-refresh", "auth-import",
+    parser.add_argument("command", choices=["inspect", "export-template", "serve", "doctor",
+                                              "auth-status", "auth-refresh", "auth-import",
                                               "oauth-login", "oauth-status", "oauth-refresh", "oauth-bind"])
+    parser.add_argument("--out", help="export-template: destination path for the template fixture.")
     parser.add_argument("--har", default=os.environ.get("PRISM_HAR_PATH"))
     parser.add_argument("--template-file", default=os.environ.get("PRISM_TEMPLATE_FILE"))
     parser.add_argument("--cookie-file", default=os.environ.get("PRISM_COOKIE_FILE"))
@@ -118,6 +120,28 @@ def main():
                                                   for e in starts for h in e["request"].get("headers", [])),
                           "native_tool_schema_observed": any("tools" in json.loads(e["request"]["postData"]["text"])
                                                              for e in starts)}, indent=2))
+        return
+    if args.command == "export-template":
+        if not args.har:
+            parser.error("export-template needs --har/PRISM_HAR_PATH.")
+        if not args.out:
+            parser.error("export-template needs --out.")
+        try:
+            template = SessionTemplate.from_har(args.har, allow_missing_cookie=True)
+        except BridgeError as exc:
+            parser.error(str(exc))
+        fixture = template.to_fixture()
+        Path(args.out).write_text(json.dumps(fixture, ensure_ascii=False, indent=1), encoding="utf-8")
+        meta = fixture["metadata"]
+        print(json.dumps({"operation": "export-template", "out": args.out,
+                          "model": meta.get("model"),
+                          "reasoning_effort": meta.get("reasoning_effort"),
+                          "projectId": meta.get("projectId"),
+                          "userId": meta.get("userId"),
+                          "has_conversation_action": fixture["conversation_action"] is not None,
+                          "has_editor_context": fixture["editor_context"] is not None,
+                          "has_initial_system": fixture["initial_system"] is not None,
+                          "cookie_included": False}, indent=2, ensure_ascii=False))
         return
     try:
         seed = None
