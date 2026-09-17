@@ -26,6 +26,41 @@ from .protocol import BridgeError
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+MAX_CREDENTIAL_BYTES = 64 * 1024
+
+
+async def read_json_body(request: Request, allowed_fields: set[str]) -> dict:
+    """Read a small credential payload, rejecting oversize or unexpected fields.
+
+    Unknown keys are refused rather than ignored so a caller cannot smuggle in
+    fields (a file path, a state-file override) that a future handler might read.
+    """
+    declared = request.headers.get("content-length")
+    if declared:
+        try:
+            if int(declared) > MAX_CREDENTIAL_BYTES:
+                raise BridgeError("Credential request is too large.", "auth_content_too_large", 413)
+        except ValueError:
+            raise BridgeError("Invalid Content-Length header.", "invalid_content_length", 400) from None
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > MAX_CREDENTIAL_BYTES:
+            raw.clear()
+            raise BridgeError("Credential request is too large.", "auth_content_too_large", 413)
+    try:
+        body = json.loads(bytes(raw))
+    except (UnicodeDecodeError, ValueError):
+        raw.clear()
+        raise BridgeError("Request body must be JSON.", "invalid_request", 400) from None
+    finally:
+        raw.clear()
+    if not isinstance(body, dict) or not set(body) or not set(body) <= allowed_fields:
+        raise BridgeError(f"Request accepts only these fields: {', '.join(sorted(allowed_fields))}.",
+                          "invalid_request", 400)
+    return body
+
+
 def _mask(value, keep: int = 8) -> str:
     if not isinstance(value, str) or not value:
         return ""
@@ -173,8 +208,8 @@ def create_admin_router(backend, api_key: str, traffic, oauth=None, *, port: int
     @router.post("/ui/api/auth/cookie")
     async def auth_cookie(request: Request):
         check_key(request)
-        body = await request.json()
-        cookie = (body or {}).get("cookie", "")
+        body = await read_json_body(request, {"cookie"})
+        cookie = body.get("cookie", "")
         if not isinstance(cookie, str) or "=" not in cookie:
             raise BridgeError("Paste the full Cookie header value from a signed-in Prism request.",
                               "invalid_request", 400)
@@ -186,9 +221,9 @@ def create_admin_router(backend, api_key: str, traffic, oauth=None, *, port: int
     @router.post("/ui/api/auth/import")
     async def auth_import(request: Request):
         check_key(request)
-        body = await request.json()
-        token = (body or {}).get("token") or ""
-        content = (body or {}).get("content") or ""
+        body = await read_json_body(request, {"token", "content"})
+        token = body.get("token") or ""
+        content = body.get("content") or ""
         if not token and content:
             token = _token_from_content(content)
         if not isinstance(token, str) or not token.strip() or any(c.isspace() for c in token.strip()):

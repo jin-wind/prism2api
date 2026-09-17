@@ -156,7 +156,15 @@ class SessionTemplate:
         if not re.fullmatch(r"cdx1_[0-9a-f-]{36}", conversation):
             raise BridgeError("Invalid Prism Codex conversation identity.", "prism_protocol_error", 502)
         # proxy_request_debug is a serialized JSON object, NOT a boolean flag.
-        metadata.update(model=model, reasoning_effort=effort)
+        # "max" is carried as output_config, not reasoning_effort; sending both
+        # is rejected upstream.
+        metadata.update(model=model)
+        if effort == "max":
+            metadata.pop("reasoning_effort", None)
+            metadata["output_config"] = {"effort": "max"}
+        else:
+            metadata["reasoning_effort"] = effort
+            metadata.pop("output_config", None)
         metadata["sandbox_url"] = metadata["sandbox_url"].rstrip("/") + "/"
         try:
             snapshot = loads(metadata.get("codex_listen_snapshot", "null")) or {}

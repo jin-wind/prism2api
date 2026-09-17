@@ -63,7 +63,7 @@ def normalize(body: dict, previous: list | None = None) -> tuple[list, dict]:
             raise BridgeError(f"{key} must be boolean.")
     reasoning = body.get("reasoning") or {}
     if not isinstance(reasoning, dict) or reasoning.get("effort", "medium") not in (
-        "none", "minimal", "low", "medium", "high", "xhigh"
+        "none", "minimal", "low", "medium", "high", "xhigh", "max"
     ):
         raise BridgeError("Invalid reasoning effort.")
     text_config = body.get("text") or {}

@@ -229,7 +229,10 @@ const $ = id => document.getElementById(id);
 let KEY = "";
 
 /* ---------- key handling ---------- */
+let WANT_TAB = "";
 (function initKey(){
+  // /oauth redirects here with #login so the old bookmark lands on the right tab.
+  if (/(^|[#&])login(&|$)/.test(location.hash || "")) WANT_TAB = "login";
   const m = location.hash.match(/[#&]key=([^&]+)/);
   if (m) {
     try { localStorage.setItem("bridgeKey", decodeURIComponent(m[1])); } catch(e){}
@@ -376,7 +379,7 @@ $("authRefreshBtn").onclick = async () => {
 let oauthTimer = null;
 $("oauthOpenBtn").onclick = async () => {
   try {
-    const r = await fetch("/oauth/login").then(x => x.json());
+    const r = await api("/oauth/login");
     window.open(r.authorization_url, "_blank");
     setMsg("oauthMsg", "ok", "已打开登录页；完成登录后回到这里。Login page opened — finish there, then come back.");
     if (oauthTimer) clearInterval(oauthTimer);
@@ -384,7 +387,7 @@ $("oauthOpenBtn").onclick = async () => {
     oauthTimer = setInterval(async () => {
       ticks++;
       try {
-        const st = await fetch("/oauth/status").then(x => x.json());
+        const st = await api("/oauth/status");
         if (st.configured && !st.expired){
           clearInterval(oauthTimer); oauthTimer = null;
           $("oauthPoll").textContent = "";
@@ -401,7 +404,8 @@ $("oauthSubmitBtn").onclick = async () => {
   if (!url){ setMsg("oauthMsg", "bad", "请先粘贴回调 URL paste the callback URL first"); return; }
   try {
     const fd = new URLSearchParams(); fd.set("callback_url", url);
-    const r = await fetch("/oauth/submit", {method: "POST", body: fd});
+    const r = await fetch("/oauth/submit", {method: "POST", body: fd,
+                                            headers: {"X-Bridge-Key": KEY}});
     const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
     setMsg("oauthMsg", "ok", `OAuth 登录成功 login ok: ${j.email || ""} — 现在点“绑定到 Prism”。`);
@@ -535,6 +539,11 @@ let dashTimer = null;
 function boot(){
   $("gate").classList.add("hidden");
   $("appRoot").classList.remove("hidden");
+  if (WANT_TAB){
+    const btn = document.querySelector(`nav button[data-tab="${WANT_TAB}"]`);
+    WANT_TAB = "";
+    if (btn) btn.click();
+  }
   refreshDash();
   if (dashTimer) clearInterval(dashTimer);
   dashTimer = setInterval(() => {

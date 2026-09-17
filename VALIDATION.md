@@ -1,5 +1,36 @@
 # 验证记录
 
+## v0.3.1（2026-09-17）：安全加固（采纳外部代码审查）
+
+外部审查者基于 v0.2.2 提交了一份改动，其中的安全发现已采纳，两处"仅限 loopback"
+的限制按本项目的公网部署方式改造后采纳。
+
+已修复的真实问题：
+- **`/oauth*` 全部端点此前无任何认证**，且已随 v0.3.0 暴露在公网。实测确认任何人都能
+  `GET /oauth/login` 取得授权链接、`POST /oauth/submit` 把自己的 OpenAI 账号绑定到本桥接。
+  现在除 `/oauth/callback` 外全部要求 bridge key；`/oauth/callback` 由 PKCE state 保护
+  （state 只能由持密钥者通过 `/oauth/login` 生成）。
+- `TrustedHostMiddleware` 从 `allowed_hosts=["*"]` 改为默认仅 loopback，公网主机须经
+  `--public-host` / `PRISM_BRIDGE_PUBLIC_HOST` 显式声明。实测：未声明的 Host 返回 400，
+  已声明的返回 200，声明一个不会重开通配。
+- 旧 `/oauth` 页面 `return html` 返回裸字符串，被 FastAPI 序列化成 JSON，页面一直是坏的；
+  该页每次 GET 还会新建一个 PKCE pending 会话（公网可达时为无界增长）。现改为 307 跳转
+  到 `/ui#login`，该 tab 功能更全且会携带密钥。
+- 凭据导入接口加入 64 KiB 上限、Content-Length 校验和严格字段白名单（多传 `path` 之类
+  字段直接拒绝，而不是忽略）。
+- 管理端点响应加 `X-Content-Type-Options`、`Referrer-Policy`、CSP（含 `frame-ancestors 'none'`）。
+
+一并采纳的功能：`reasoning effort = "max"`，上游映射为 `output_config={"effort":"max"}`
+并移除 `reasoning_effort`（两者同时出现会被上游拒绝）。该键名差异源自外部审查者的观察，
+本轮未独立用真实 Prism 验证。
+
+未采纳：外部版本的 `/admin` 面板（功能是本项目 `/ui` 控制台的子集）与其 `safe_status()`
+（`admin.py` 已有等价的脱敏逻辑）。
+
+验证：`python -m pytest -q` **110 passed**；UI JavaScript 通过 Node 语法检查；
+本地实测（端口 8899）：`/oauth/status` 与 `/oauth/login` 无密钥 401、带密钥 200，
+`/oauth` 307 跳转，`/ui` 200，声明的公网 Host 200，伪造 Host 400，`/v1/models` Bearer 200。
+
 ## v0.3.0（2026-09-17）：Web UI 控制台
 
 - 新增 `/ui` 控制台（单文件、无构建步骤）：总览、三种登录方式、流量、诊断、Codex 接入。

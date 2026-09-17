@@ -102,6 +102,9 @@ def main():
     parser.add_argument("--oauth-state", default=os.environ.get("PRISM_OAUTH_STATE", ".local/oauth-state.json"))
     parser.add_argument("--oauth-code", help="Manual authorization code for oauth-login (paste from browser).")
     parser.add_argument("--oauth-state-code", help="OAuth state value paired with --oauth-code.")
+    parser.add_argument("--public-host", default=os.environ.get("PRISM_BRIDGE_PUBLIC_HOST", ""),
+                        help="Comma-separated Host values to accept besides loopback, e.g. a server IP or domain. "
+                             "Required when the port is reachable from outside this machine.")
     parser.add_argument("--provision", action="store_true", help="doctor only: acquire/sync a sandbox without submitting any model prompt.")
     parser.add_argument("--deadline", type=float, default=120, help="doctor absolute time budget in seconds.")
     args = parser.parse_args()
@@ -159,7 +162,8 @@ def main():
                                read_timeout=float(os.environ.get("PRISM_HTTP_READ_TIMEOUT", "90")), diagnostics=True)
         app = create_app(backend, os.environ.get("PRISM_BRIDGE_API_KEY", ""),
                          oauth=make_oauth(args) if args.command == "serve" else None,
-                         port=args.port)
+                         port=args.port,
+                         public_hosts=[h.strip() for h in args.public_host.split(",") if h.strip()])
     except (BridgeError, ValueError) as exc:
         parser.error(str(exc))
     if args.command == "serve":

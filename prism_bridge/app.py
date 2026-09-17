@@ -8,7 +8,7 @@ import urllib.parse
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .protocol import (MAX_BYTES, BridgeError, MemoryStore, ToolContinuationStore, dumps, loads, make_prompt,
@@ -16,9 +16,18 @@ from .protocol import (MAX_BYTES, BridgeError, MemoryStore, ToolContinuationStor
 from .oauth import OAuthManager, REDIRECT_DEFAULT
 from .obs import TrafficRecorder
 
+# Loopback hosts are always trusted; anything else must be named explicitly by
+# the operator through public_hosts, so a default install cannot be reached
+# through an attacker-supplied Host header.
+LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]", "::1", "testserver"]
+
+# Browser-navigable management pages. They carry no secrets: the page asks the
+# browser for the bridge key and sends it on every API call.
+OPEN_MANAGEMENT_PATHS = frozenset({"/ui", "/oauth"})
+
 
 def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | None = None,
-               ui: bool = True, port: int = 8765):
+               ui: bool = True, port: int = 8765, public_hosts=()):
     if not api_key or len(api_key) < 16:
         raise ValueError("PRISM_BRIDGE_API_KEY must have at least 16 characters.")
     store = MemoryStore()
@@ -32,7 +41,8 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
 
     app = FastAPI(title="Prism Codex Bridge (experimental)", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+    allowed = list(LOOPBACK_HOSTS) + [h for h in public_hosts if h]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed)
 
     if oauth is not None:
         @app.get("/oauth/login")
@@ -51,25 +61,11 @@ def create_app(backend, api_key: str, *, keepalive=10, oauth: OAuthManager | Non
 
         @app.get("/oauth")
         async def oauth_guide():
-            login_state = oauth.build_authorize_url()
-            html = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>Prism Bridge OAuth 登录</title>
-<style>body{font-family:system-ui;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.6}
-pre{background:#f5f5f5;padding:12px;border-radius:8px;overflow-x:auto;word-break:break-all}
-input{width:100%%;padding:8px;box-sizing:border-box}button{padding:8px 18px;margin-top:8px}
-.ok{color:#0a7d39;font-weight:600}</style></head><body>
-<h2>Prism Bridge 登录</h2>
-<p>点击下面按钮在新标签页打开 OpenAI 官方登录(登录后会自动回调本服务器):</p>
-<p><a href="%s" target="_blank"><button>在浏览器登录 OpenAI</button></a></p>
-<p>如果浏览器显示“无法连接/回调失败”,请把地址栏里完整的 URL(以 <code>http://.../oauth/callback?code=...</code> 开头)复制到下面粘贴提交:</p>
-<form method="post" action="/oauth/submit">
-<input type="text" name="callback_url" placeholder="http://144.79.170.102:8765/oauth/callback?code=...&amp;state=..." required>
-<button type="submit">提交并完成登录</button>
-</form>
-<hr><p>当前状态: <code id="st">检查中...</code></p>
-<script>fetch('/oauth/status').then(r=>r.json()).then(j=>{document.getElementById('st').textContent=JSON.stringify(j)});</script>
-</body></html>""" % login_state
-            return html
+            # The console's login tab supersedes this page and, unlike it, sends
+            # the bridge key with every action. The old page also minted a
+            # pending PKCE session on each GET, which is unbounded growth once
+            # the port is reachable from anywhere.
+            return RedirectResponse("/ui#login", status_code=307)
 
         @app.post("/oauth/submit")
         async def oauth_submit(request: Request):
@@ -161,14 +157,37 @@ input{width:100%%;padding:8px;box-sizing:border-box}button{padding:8px 18px;marg
     async def handle_error(_, exc):
         return JSONResponse({"error": exc.payload()}, status_code=exc.status)
 
+    def management_headers(result):
+        result.headers["Cache-Control"] = "no-store"
+        result.headers["X-Content-Type-Options"] = "nosniff"
+        result.headers["Referrer-Policy"] = "no-referrer"
+        result.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        )
+        return result
+
+    def has_bridge_key(request) -> bool:
+        supplied = request.headers.get("x-bridge-key", "")
+        if hmac.compare_digest(supplied.encode(), api_key.encode()):
+            return True
+        expected = "Bearer " + api_key
+        return hmac.compare_digest(request.headers.get("authorization", "").encode(), expected.encode())
+
     @app.middleware("http")
     async def auth(request, call_next):
+        path = request.url.path
+        if path in OPEN_MANAGEMENT_PATHS or path.startswith("/ui/") or path.startswith("/oauth/"):
+            # /oauth/callback is reached by a browser redirect from
+            # auth.openai.com and cannot carry a key; it is instead gated by the
+            # PKCE state, which only a key-holder could have minted through
+            # /oauth/login. Every other management route requires the key.
+            if path not in OPEN_MANAGEMENT_PATHS and path != "/oauth/callback" and not has_bridge_key(request):
+                return management_headers(JSONResponse(
+                    {"error": {"message": "Management endpoints require the bridge key.",
+                               "type": "authentication_error"}}, status_code=401))
+            return management_headers(await call_next(request))
         # This is a loopback API for Codex, not a browser endpoint.
-        if request.url.path == "/oauth" or request.url.path.startswith("/oauth/"):
-            return await call_next(request)
-        if request.url.path == "/ui" or request.url.path.startswith("/ui/"):
-            # Browser-facing admin UI; /ui/api/* verifies X-Bridge-Key itself.
-            return await call_next(request)
         if request.headers.get("origin"):
             return JSONResponse({"error": {"message": "Browser-origin requests are not accepted."}}, status_code=403)
         expected = "Bearer " + api_key

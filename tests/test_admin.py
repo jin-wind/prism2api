@@ -52,6 +52,14 @@ def client(backend=None, **kwargs):
                       headers={"Authorization": "Bearer " + KEY}), backend
 
 
+def test_max_reasoning_effort_accepted():
+    backend = FakeAdminBackend([{"text": "ok"}])
+    c, _ = client(backend)
+    with c:
+        r = c.post("/v1/responses", json={"input": "t", "reasoning": {"effort": "max"}})
+        assert r.status_code == 200
+
+
 UI_KEY = {"X-Bridge-Key": KEY, "Authorization": ""}
 
 
@@ -146,6 +154,78 @@ def test_auth_cookie_rejects_garbage():
         assert r.status_code == 400
         r = c.post("/ui/api/auth/import", headers=UI_KEY, json={"content": "{\"nope\": 1}"})
         assert r.status_code == 400
+
+
+def test_untrusted_host_rejected_unless_declared_public():
+    c, _ = client()
+    with c:
+        assert c.get("/health", headers={"Host": "144.79.170.102:8765"}).status_code == 400
+    c, _ = client(public_hosts=["144.79.170.102"])
+    with c:
+        assert c.get("/health", headers={"Host": "144.79.170.102:8765"}).status_code == 200
+        # Declaring one public host must not re-open the wildcard.
+        assert c.get("/health", headers={"Host": "attacker.example"}).status_code == 400
+
+
+def test_oauth_endpoints_require_the_bridge_key(tmp_path):
+    from prism_bridge.oauth import OAuthManager
+    backend = FakeAdminBackend()
+    app = create_app(backend, KEY, oauth=OAuthManager(tmp_path / "oauth.json"))
+    with TestClient(app, base_url="http://localhost") as c:
+        # Previously these were reachable with no credential at all, which let
+        # anyone bind their own OpenAI account to someone else's bridge.
+        for path in ("/oauth/status", "/oauth/login"):
+            assert c.get(path).status_code == 401
+            assert c.get(path, headers={"X-Bridge-Key": KEY}).status_code == 200
+        assert c.post("/oauth/submit", data={"callback_url": "x"}).status_code == 401
+        assert c.post("/oauth/refresh").status_code == 401
+        assert c.post("/oauth/exchange", json={"code": "c", "state": "s"}).status_code == 401
+
+
+def test_oauth_callback_stays_open_but_is_state_gated(tmp_path):
+    from prism_bridge.oauth import OAuthManager
+    app = create_app(FakeAdminBackend(), KEY, oauth=OAuthManager(tmp_path / "oauth.json"))
+    with TestClient(app, base_url="http://localhost") as c:
+        # The browser redirect from auth.openai.com carries no key; an unknown
+        # PKCE state must still be refused.
+        r = c.get("/oauth/callback", params={"code": "abc", "state": "never-issued"})
+        assert r.status_code == 400
+        assert r.json()["code"] == "oauth_invalid_state"
+
+
+def test_oauth_page_redirects_to_console(tmp_path):
+    from prism_bridge.oauth import OAuthManager
+    oauth = OAuthManager(tmp_path / "oauth.json")
+    app = create_app(FakeAdminBackend(), KEY, oauth=oauth)
+    with TestClient(app, base_url="http://localhost") as c:
+        r = c.get("/oauth", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/ui#login"
+        # The old page minted a PKCE session on every GET; the redirect must not.
+        assert oauth.pending == {}
+
+
+def test_management_responses_carry_security_headers():
+    c, _ = client()
+    with c:
+        r = c.get("/ui", headers={"Authorization": ""})
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["referrer-policy"] == "no-referrer"
+        assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+
+
+def test_credential_import_rejects_oversize_and_unknown_fields():
+    c, _ = client()
+    with c:
+        big = c.post("/ui/api/auth/import", headers=UI_KEY, content=b"x" * (64 * 1024 + 1))
+        assert big.status_code == 413
+        assert big.json()["error"]["code"] == "auth_content_too_large"
+        # An unexpected field must be refused, not silently ignored.
+        sneaky = c.post("/ui/api/auth/import", headers=UI_KEY,
+                        json={"content": "{}", "path": "C:\\secret.json"})
+        assert sneaky.status_code == 400
+        assert c.post("/ui/api/auth/cookie", headers=UI_KEY,
+                      json={"cookie": "a=b", "state_file": "/etc/passwd"}).status_code == 400
 
 
 def test_ui_disabled_flag():
