@@ -232,7 +232,8 @@ def test_unmapped_reason_is_carried_only_when_it_looks_like_an_enum():
     details = task_failure_details({"status": "error", "payload": {"reason": "sandbox_expired"}})
     assert details["upstream_reason"] == "unknown"
     assert details["upstream_reason_raw"] == "sandbox_expired"
-    assert details["upstream_shape"] == ["payload", "status"]
+    assert details["upstream_shape"] == ["payload", "payload.reason", "status"]
+    assert details["upstream_task_status"] == "error"
     # Anything not enum-shaped (spaces, length, a JWT-ish blob) is dropped.
     for hostile in ["a b", "x" * 80, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0", "", None, 5,
                     "Bearer sk-abc", "user@example.com",

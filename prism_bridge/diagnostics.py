@@ -32,9 +32,14 @@ def task_failure_details(wrapper):
     payload = payload if isinstance(payload, dict) else {}
     raw_reason = safe_reason(payload.get("reason"))
     # Key names describe the response shape, never its contents, and are what
-    # reveals an upstream schema change.
-    shape = sorted(k for k in (list(wrapper) if isinstance(wrapper, dict) else [])
-                   if isinstance(k, str) and SAFE_KEY.fullmatch(k))[:12]
+    # reveals an upstream schema change. The payload level is included because a
+    # failure carrying no "reason" at all is itself the diagnosis.
+    def keys(obj, prefix=""):
+        return [prefix + k for k in (list(obj) if isinstance(obj, dict) else [])
+                if isinstance(k, str) and SAFE_KEY.fullmatch(k)]
+
+    shape = sorted(keys(wrapper) + keys(payload, "payload."))[:20]
+    task_status = safe_reason(wrapper.get("status") if isinstance(wrapper, dict) else None)
     reason = payload.get("reason")
     reason = reason if reason in ("sandbox_reconnecting", "conversation_too_large",
                                   "project_edit_access_required", "unknown") else "unknown"
@@ -51,6 +56,7 @@ def task_failure_details(wrapper):
     return {"upstream_reason": reason, "upstream_category": category,
             **({"upstream_status": status} if status is not None else {}),
             **({"upstream_reason_raw": raw_reason} if raw_reason and raw_reason != reason else {}),
+            **({"upstream_task_status": task_status} if task_status else {}),
             **({"upstream_shape": shape} if shape else {})}
 
 
@@ -90,7 +96,7 @@ class Diagnostics:
 
     def emit(self, stage, phase, *, seconds=None, http_status=None, error_code=None, error_class=None,
              upstream_state=None, upstream_reason=None, upstream_category=None, upstream_status=None,
-             upstream_reason_raw=None, upstream_shape=None):
+             upstream_reason_raw=None, upstream_shape=None, upstream_task_status=None):
         event = {"at": datetime.now(timezone.utc).isoformat(), "stage": stage, "phase": phase}
         if seconds is not None:
             event["seconds"] = round(seconds, 3)
@@ -102,7 +108,8 @@ class Diagnostics:
             event["error_class"] = error_class
         for key, value in (("upstream_state", upstream_state), ("upstream_reason", upstream_reason),
                            ("upstream_category", upstream_category), ("upstream_status", upstream_status),
-                           ("upstream_reason_raw", upstream_reason_raw), ("upstream_shape", upstream_shape)):
+                           ("upstream_reason_raw", upstream_reason_raw), ("upstream_shape", upstream_shape),
+                           ("upstream_task_status", upstream_task_status)):
             if value is not None:
                 event[key] = value
         self.events.append(event)
