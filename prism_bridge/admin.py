@@ -211,6 +211,27 @@ def create_admin_router(backend, api_key: str, traffic, oauth=None, *, port: int
         summary = await _probe_and_adopt(seed, import_only=True)
         return {"ok": True, "method": "oauth_bind", "email": state.email, **summary}
 
+    @router.get("/ui/api/config")
+    async def config_view(request: Request):
+        """Read-only effective runtime configuration. These are boot-time
+        settings (env vars / CLI flags); changing them requires a restart,
+        so the UI shows rather than edits them."""
+        check_key(request)
+        auth = backend.auth
+        return {
+            "port": port,
+            "turn_timeout_s": getattr(backend, "timeout", None),
+            "read_timeout_s": getattr(backend, "read_timeout", None),
+            "poll_interval_s": getattr(backend, "poll", None),
+            "auth_state_file": auth.state_file.name if auth and auth.state_file else None,
+            "sources": {
+                "PRISM_TURN_TIMEOUT": "单轮总超时（秒）/ total per-turn timeout",
+                "PRISM_HTTP_READ_TIMEOUT": "上游单次读取超时（秒）/ upstream read timeout",
+                "PRISM_AUTH_STATE": "认证状态文件路径 / auth state path",
+                "PRISM_HAR_PATH / --har": "模板来源，改动需重启 / template source, restart to change",
+            },
+        }
+
     # ---- Codex setup helper ----------------------------------------------
 
     @router.get("/ui/api/setup")

@@ -131,6 +131,14 @@ def test_setup_returns_profile_config():
         assert s["env_key"] == "PRISM_BRIDGE_API_KEY"
 
 
+def test_config_view_is_read_only_snapshot():
+    c, _ = client(port=8123)
+    with c:
+        cfg = c.get("/ui/api/config", headers=UI_KEY).json()
+        assert cfg["port"] == 8123
+        assert "sources" in cfg
+
+
 def test_auth_cookie_rejects_garbage():
     c, _ = client()
     with c:

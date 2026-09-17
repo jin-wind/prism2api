@@ -212,6 +212,12 @@ pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
       <span id="copyMsg" class="muted"></span></div>
     <pre id="setupToml">…</pre>
   </div>
+  <div class="section">
+    <h2>运行配置 Runtime config（只读）</h2>
+    <p class="hint">这些是启动时通过环境变量 / 命令行参数确定的设置，修改后需重启桥接服务。<br>
+      Boot-time settings; restart the bridge to change them.</p>
+    <div id="configRows"></div>
+  </div>
 </div>
 
 </main>
@@ -504,6 +510,16 @@ async function loadSetup(){
     const s = await api("/ui/api/setup");
     $("setupToml").textContent = s.config_toml;
     $("setupPath").textContent = s.config_path;
+    const cfg = await api("/ui/api/config");
+    const rows = [
+      ["端口 port", cfg.port],
+      ["单轮总超时 turn timeout", cfg.turn_timeout_s + "s（PRISM_TURN_TIMEOUT）"],
+      ["上游读取超时 read timeout", cfg.read_timeout_s + "s（PRISM_HTTP_READ_TIMEOUT）"],
+      ["轮询间隔 poll interval", cfg.poll_interval_s + "s"],
+      ["认证状态文件 auth state", cfg.auth_state_file || "—（PRISM_AUTH_STATE）"],
+    ];
+    $("configRows").innerHTML = rows.map(([k,v]) =>
+      `<div class="kv"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join("");
     setupLoaded = true;
   } catch(e){ $("setupToml").textContent = e.message; }
 }
