@@ -1,8 +1,47 @@
-# Prism → 本地 Codex Responses 适配器（实验版）
+# Prism → Codex API 桥接器
 
-**已实网验证登录/刷新、access-token 导入，以及真实 Codex function/custom 工具的完整两轮闭环。仍是实验版，不保证上游持续可用。**
-Prism 上游曾返回 500/502、传输中断；浏览器完整 HAR 也记录了 503 和沙箱初始化超时。不能把这些测试称为完整端到端成功。
-登录方式、OAuth 与 session 的区别见 [AUTH.md](AUTH.md)。
+一个使用 Python 构建的实验性适配器：将 Prism 网页使用的 agent 接口转换为 Codex 可调用的 Responses API，并提供中文 / 英文 Web 管理控制台。
+
+**当前版本：v0.3.3。** 已使用真实 Prism 验证文本回答、两轮 function-call 协议交互和 SSE 事件输出；这不代表生产级稳定性或完整 OpenAI API 兼容。Prism 曾出现 400、500/502/503、传输中断和沙箱初始化超时，上游改版也可能使捕获的模板失效。
+
+> 本项目不是 OpenAI 官方产品。仅使用你有权访问的账号和项目，并遵守上游服务条款。不要提交或公开 HAR、Cookie、access token、认证状态文件或私有模板。
+
+## 快速导航
+
+- [快速开始](#快速开始)
+- [Web 管理控制台](#web-ui控制台v030-新增)
+- [API 调用示例](#api-调用示例)
+- [支持范围与限制](#当前边界)
+- [更新上游模板](#配置摘要)
+- [故障排查](#遇到-readtimeout--stream-disconnected-before-completion)
+- [认证说明](AUTH.md)：OAuth、Prism session 与 access token 的区别
+- [验证记录](VALIDATION.md)：测试条件、成功样本与尚未验证的内容
+
+## 快速开始
+
+需要 **Python 3.11+**；使用 Codex 时还需要支持 Responses 自定义 provider 的 Codex 客户端。
+
+```powershell
+git clone https://github.com/jin-wind/prism-codex-bridge.git
+cd prism-codex-bridge
+python -m pip install -e '.[test]'
+
+# HAR 必须来自你有权访问的 Prism 会话，并包含模型请求。
+python -m prism_bridge inspect --har 'C:\private\prism.har'
+.\Start-Bridge.ps1 -HarPath 'C:\private\prism.har'
+```
+
+打开启动终端输出的 `/ui#key=…` 地址，在「登录」页配置 Prism 凭据，然后运行预检。首次使用可不准备 Cookie 文件，服务允许未认证启动；模型调用仍需要有效的上游认证和模板。
+
+在希望 Codex 操作的项目目录中，运行本仓库的 `Use-Codex.ps1`。详细步骤见下方「Windows 启动」。
+
+### 部署安全
+
+- 默认只监听本机回环地址；远程访问需显式配置可信 Host（`--public-host`）。
+- 公网部署应使用 **HTTPS 反向代理**，并限制后端端口访问。Host 白名单和 bridge key 不能代替 TLS。
+- 启动地址中的 bridge key 是访问凭据，不要分享终端日志、完整 URL 或含密钥的截图。
+- `.local/`、HAR、认证文件和部署模板应保持私有；模板即使不含 Cookie，也可能包含资源令牌、项目和用户标识。
+- 控制台是实验性管理界面，不应当作经过完整安全审计的多用户管理系统。
 
 ## 接的到底是哪层 API？
 
@@ -42,6 +81,31 @@ HAR 中 7 次启动请求没有 `tools` / `tool_choice`，工具进度则由远�
 
 **桥接程序本身不执行本地工具，也不解析/执行工具返回文本中的命令。**
 工具调用是标准 Responses item，由 Codex 客户端决定是否允许以及在哪里执行。
+
+## API 调用示例
+
+下面使用 PowerShell 调用本地桥接。`PRISM_BRIDGE_API_KEY` 是桥接密钥，**不是** OpenAI access token；请先从本地私有配置设置该环境变量。
+
+```powershell
+$base = 'http://127.0.0.1:8765'
+$headers = @{ Authorization = "Bearer $env:PRISM_BRIDGE_API_KEY" }
+
+# 以当前服务公布的模型 ID 为准，不要沿用旧 HAR 中的名称。
+$models = Invoke-RestMethod "$base/v1/models" -Headers $headers
+$model = $models.data[0].id
+$body = @{
+    model = $model
+    input = '请用一句话介绍自己。'
+    stream = $false
+} | ConvertTo-Json
+
+$result = Invoke-RestMethod "$base/v1/responses" `
+    -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' `
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+$result.output | ConvertTo-Json -Depth 10
+```
+
+请求 `stream=true` 时返回 SSE。客户端需要处理 `response.completed` 和失败事件；桥接不会因为 start 请求超时而自动重发可能已被上游接受的任务。
 
 ## 当前边界
 
@@ -124,7 +188,7 @@ python -m prism_bridge export-template `
   --out .local\template-new.json
 ```
 
-导出的 fixture 不含 Cookie；部署方自带 auth-state 文件。
+导出的 fixture 默认不含 Cookie，但仍可能包含敏感资源令牌和项目 / 用户标识，**不得提交到公开仓库**。部署时使用私有 auth-state 文件；更新 template 后需重启对应服务。
 
 直接运行服务时的环境变量：
 
@@ -195,7 +259,9 @@ python scripts/codex_smoke.py --codex 'C:\path\to\codex.exe' --mode all
 ```
 
 第二个测试调用真实 Codex CLI，但**模型上游是进程内的合成后端**，不会访问 Prism。
-完整验证结果及未验证项见 `VALIDATION.md`；本次单元测试为 **93 passed**。
+完整验证结果及未验证项见 `VALIDATION.md`；v0.3.3 的单元测试为 **112 passed**。
+2026-09-17 更新模板后的实网样本覆盖文本、function-call 两轮协议和 SSE；其中 function 测试由脚本提供固定工具结果，**不等同于真实 Codex 执行本地工具**。此前真实 Codex 的验证条件单独记录在 `VALIDATION.md`。
+尚未充分验证：长期稳定性、长上下文、并发、多轮编码与文件写入，以及 Web UI 的完整浏览器登录流程。
 测试使用临时 `CODEX_HOME` 和工作目录；覆盖文本、function call、本地 custom tool 与结果回传。
 本机 CLI 0.154.0 通过 `clock.sleep` 和 `functions.exec → clock__curr_time` 验证。
 最初写入测试被本地 read-only sandbox 拒绝，未放宽该权限；改用只读 custom tool 验证协议。
