@@ -7,10 +7,34 @@ import sys
 import time
 
 
+# A reason code is short lowercase words joined by _ or -, like
+# "project_edit_access_required". Bounding each segment to 16 characters is what
+# excludes credential material: a token or JWT segment is one long run with no
+# separator, and mixed case or a dot fails outright.
+SAFE_REASON = re.compile(r"[a-z][a-z0-9]{0,15}(?:[_-][a-z0-9]{1,15}){0,4}")
+SAFE_KEY = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+
+
+def safe_reason(value):
+    """Pass through an upstream reason code only if it looks like an enum value."""
+    return value if isinstance(value, str) and SAFE_REASON.fullmatch(value) else None
+
+
 def task_failure_details(wrapper):
-    """Project arbitrary upstream text onto a small, credential-free vocabulary."""
+    """Project arbitrary upstream text onto a small, credential-free vocabulary.
+
+    The mapped category stays stable for callers, but the raw reason code and the
+    response's key names are carried alongside it: without them an unmapped
+    failure is indistinguishable from every other unmapped failure, which makes
+    a live incident impossible to diagnose.
+    """
     payload = wrapper.get("payload") if isinstance(wrapper, dict) else None
     payload = payload if isinstance(payload, dict) else {}
+    raw_reason = safe_reason(payload.get("reason"))
+    # Key names describe the response shape, never its contents, and are what
+    # reveals an upstream schema change.
+    shape = sorted(k for k in (list(wrapper) if isinstance(wrapper, dict) else [])
+                   if isinstance(k, str) and SAFE_KEY.fullmatch(k))[:12]
     reason = payload.get("reason")
     reason = reason if reason in ("sandbox_reconnecting", "conversation_too_large",
                                   "project_edit_access_required", "unknown") else "unknown"
@@ -25,7 +49,9 @@ def task_failure_details(wrapper):
         status = int(match.group(1)[:3])
         category = "upstream_service_error"
     return {"upstream_reason": reason, "upstream_category": category,
-            **({"upstream_status": status} if status is not None else {})}
+            **({"upstream_status": status} if status is not None else {}),
+            **({"upstream_reason_raw": raw_reason} if raw_reason and raw_reason != reason else {}),
+            **({"upstream_shape": shape} if shape else {})}
 
 
 def operation_for(path):
@@ -63,7 +89,8 @@ class Diagnostics:
         self.emit("turn", "begin")
 
     def emit(self, stage, phase, *, seconds=None, http_status=None, error_code=None, error_class=None,
-             upstream_state=None, upstream_reason=None, upstream_category=None, upstream_status=None):
+             upstream_state=None, upstream_reason=None, upstream_category=None, upstream_status=None,
+             upstream_reason_raw=None, upstream_shape=None):
         event = {"at": datetime.now(timezone.utc).isoformat(), "stage": stage, "phase": phase}
         if seconds is not None:
             event["seconds"] = round(seconds, 3)
@@ -74,7 +101,8 @@ class Diagnostics:
         if error_class is not None:
             event["error_class"] = error_class
         for key, value in (("upstream_state", upstream_state), ("upstream_reason", upstream_reason),
-                           ("upstream_category", upstream_category), ("upstream_status", upstream_status)):
+                           ("upstream_category", upstream_category), ("upstream_status", upstream_status),
+                           ("upstream_reason_raw", upstream_reason_raw), ("upstream_shape", upstream_shape)):
             if value is not None:
                 event[key] = value
         self.events.append(event)

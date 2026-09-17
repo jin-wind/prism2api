@@ -217,9 +217,32 @@ def test_http200_application_error_is_classified_not_logged_as_success(phase):
 
 
 def test_task_failure_projection_does_not_return_arbitrary_text():
-    assert task_failure_details({"payload": {"reason": "secret", "message": "secret"}}) == {
-        "upstream_reason": "unknown", "upstream_category": "unknown"}
+    # The free-form message is never echoed, whatever it contains.
+    details = task_failure_details({"payload": {"reason": "secret", "message": "tok-abc.def ghi"}})
+    assert details["upstream_reason"] == "unknown"
+    assert details["upstream_category"] == "unknown"
+    assert "tok-abc.def ghi" not in str(details)
+    assert all("message" != k for k in details)
     assert task_failure_details({"payload": {"reason": "sandbox_reconnecting"}})["upstream_category"] == "sandbox_reconnecting"
+
+
+def test_unmapped_reason_is_carried_only_when_it_looks_like_an_enum():
+    # Without this an unmapped failure is indistinguishable from any other, which
+    # is what made live incidents undiagnosable.
+    details = task_failure_details({"status": "error", "payload": {"reason": "sandbox_expired"}})
+    assert details["upstream_reason"] == "unknown"
+    assert details["upstream_reason_raw"] == "sandbox_expired"
+    assert details["upstream_shape"] == ["payload", "status"]
+    # Anything not enum-shaped (spaces, length, a JWT-ish blob) is dropped.
+    for hostile in ["a b", "x" * 80, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0", "", None, 5,
+                    "Bearer sk-abc", "user@example.com",
+                    "eyJhbGciOiJIUzI1NiJ9",          # one long run, no separator
+                    "sk-proj-abcdefghijklmnopqrst",  # long unseparated segment
+                    "user-MgDLlr5H0msuiYS0khbdpW3O",
+                    "sandboxExpired"]:               # mixed case is not an enum code here
+        assert "upstream_reason_raw" not in task_failure_details({"payload": {"reason": hostile}})
+    # A mapped reason is not duplicated into the raw field.
+    assert "upstream_reason_raw" not in task_failure_details({"payload": {"reason": "sandbox_reconnecting"}})
 
 
 def test_background_keepalive_does_not_hide_model_poll_stage():
