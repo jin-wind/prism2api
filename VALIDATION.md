@@ -1,5 +1,35 @@
 # 验证记录
 
+## v0.3.3（2026-09-17）：上游改版导致的 HTTP 400，及**首次完整实网端到端通过**
+
+当日上游改版：模型 `gpt-6-astra` → **`gpt-5.6-sol`**，项目 ID 也更换。
+服务器上 9/16 抓的 template 因此失效，`model.start` 收到 HTTP 200 但内含应用错误。
+
+定位过程（每一步都是实网实测，不是推断）：
+- 诊断此前把所有未映射的失败都压成 `upstream_reason: unknown`，无法区分。
+  改为**安全透传**：`reason`/`rootCause` 仅当形如「1–6 个不超过 16 字符的词」才回显
+  （放行 `sandboxUnavailable`、`project_edit_access_required`，拦截 JWT、API key、UUID、
+  用户 ID）；`httpStatus` 为有界整数直接回显；另附响应的**键名**（不含值）。
+  自由文本 `message` 与 `codexRequestDebug` 仍然完全不回显。
+- 由此拿到 `upstream_http_status: 400` —— 是请求被拒，不是之前记录的 500/502/503 不稳定。
+- 新 HAR 对比确认模型名与项目 ID 变更。
+- 新增 `export-template --har H --out F`：此前没有受支持的 template 刷新方式，
+  只能手改 JSON，这正是本次故障恢复缓慢的原因。模型 id 改为从 template 派生
+  （原先硬编码在 4 处）。
+
+**实网端到端验证（部署在 144.79.170.102，真实 Prism + 真实凭据）**：
+
+| 测试 | 结果 |
+|---|---|
+| 单轮文本 | HTTP 200，19.2s，输出 `bridge-e2e-ok`，`model.start/ok → model.poll/ok → turn/ok` |
+| function 工具两轮闭环 | 轮 1 提议 `get_time({"tz":"UTC"})`，轮 2 回传结果后给出最终答案；各 11.4s |
+| SSE 流式 | HTTP 200，事件序列 `response.created → in_progress → output_item.added → content_part.added → … → output_item.done → completed`，载荷 `stream-ok` |
+
+这是本项目首次在**真实上游**下完成文本、工具闭环与流式三类调用的完整通过。
+仍未验证：长时间运行稳定性、长上下文、多轮编码与文件写入。
+
+验证：`python -m pytest -q` **112 passed**。
+
 ## v0.3.1（2026-09-17）：安全加固（采纳外部代码审查）
 
 外部审查者基于 v0.2.2 提交了一份改动，其中的安全发现已采纳，两处"仅限 loopback"

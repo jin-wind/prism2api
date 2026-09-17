@@ -115,7 +115,16 @@ CORS 预检拦截。`/v1` 端点保持原有 Bearer 认证与拒绝浏览器来�
 ## 配置摘要
 
 见 `prism_bridge.config.toml`：`wire_api="responses"`、`supports_websockets=false`、`web_search="disabled"`。
-`gpt-6-astra` 来自 HAR 中请求 metadata；这不是后端实际模型身份的独立验证。
+模型 id 来自 HAR 中请求 metadata（当前为 `gpt-5.6-sol`），不是后端实际模型身份的独立验证。
+Prism 改版会重命名模型并更换项目，届时用新 HAR 重新导出 template：
+
+```powershell
+python -m prism_bridge export-template `
+  --har 'D:\下載\newmodel.prism.openai.com.har' `
+  --out .local\template-new.json
+```
+
+导出的 fixture 不含 Cookie；部署方自带 auth-state 文件。
 
 直接运行服务时的环境变量：
 
